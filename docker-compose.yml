@@ -1,6 +1,21 @@
+networks:
+  dokploy-network:
+    external: true
+
 services:
   bridge:
     build: .
-    ports:
-      - "8000:8000"
     restart: unless-stopped
+    networks:
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.psvita-bridge-web.rule=Host(`vita.nimbadev.com`)
+      - traefik.http.routers.psvita-bridge-web.entrypoints=web
+      - traefik.http.routers.psvita-bridge-web.middlewares=redirect-to-https@file
+      - traefik.http.routers.psvita-bridge-websecure.rule=Host(`vita.nimbadev.com`)
+      - traefik.http.routers.psvita-bridge-websecure.entrypoints=websecure
+      - traefik.http.routers.psvita-bridge-websecure.tls.certresolver=letsencrypt
+      - traefik.http.routers.psvita-bridge-websecure.service=psvita-bridge
+      - traefik.http.services.psvita-bridge.loadbalancer.server.port=8000
