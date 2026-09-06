@@ -1,59 +1,107 @@
-# anime-vita-bridge (MVP)
+# psvita-stream-bridge
 
-Petit bridge HTTP qui expose des chaines IPTV publiques ([iptv-org/api](https://github.com/iptv-org/api),
-donnees libres, pas de contenu sous licence) sous une forme que le client
-PS Vita [NetStream](https://github.com/GrapheneCt/NetStream) sait consommer
-en mode "HTTP server" : navigation par pays -> categorie / A-Z -> chaine, et
-resolution HLS avec reecriture de manifest.
+*[Version française](README.fr.md)*
 
-## Pourquoi ce bridge existe
+A small HTTP bridge that lets [NetStream](https://github.com/GrapheneCt/NetStream)
+— a video streaming client for the **PS Vita** — browse and play live TV
+channels, organized by country, category, and an A-Z index.
 
-NetStream ne parle que HTTP simple + fichiers reconnus par extension — pas de
-JSON, pas de protocole media-server (Jellyfin/Plex/DLNA), pas de recherche
-texte. Ce service traduit une source de donnees (ici iptv-org) dans le format
-exact qu'il attend. Voir les commentaires dans `app.py` pour le detail des
-contraintes reverse-engineerees depuis le code source de NetStream.
+NetStream's "HTTP server" mode is deliberately minimal: it parses plain
+HTML `<a href>` links, has no search box, and no concept of categories. This
+project doesn't touch NetStream itself — it exposes a small API that speaks
+exactly the format NetStream already understands, backed today by
+[iptv-org](https://github.com/iptv-org/iptv)'s public channel list (~10,000
+channels, ~180 countries, no licensed content).
 
-## Lancer en local
+## Why this exists
+
+Streaming to a 2012 handheld console over a minimal HTTP-browsing client
+means the usual approach (a media-server protocol, a rich API, a search
+endpoint) is off the table. This bridge exists to work around exactly that
+— see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the specific
+NetStream constraints (found by reading its source) that shaped every
+design decision here.
+
+## Features
+
+- Navigation tree NetStream can actually browse: `country → category or
+  A-Z → channel → stream`.
+- HLS manifest rewriting so relative sub-playlist paths resolve correctly
+  on NetStream's player (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+  for why this is needed).
+- **Channel health detection**: every channel is checked in the background
+  on a schedule; dead or geo-blocked channels are automatically hidden from
+  navigation instead of showing up as a broken link on the console. A
+  `/_status` endpoint reports what's up, what's down, and why — handy for
+  telling a bad channel apart from a console/firmware issue.
+- No video proxying: the bridge only ever touches the small text manifest;
+  actual video segments stream directly from the source CDN to the Vita.
+
+## Quick start
 
 ```bash
+git clone https://github.com/TheRealBerete/psvita-stream-bridge.git
+cd psvita-stream-bridge
 pip install -r requirements.txt
-python build_channels.py   # genere data/*.json depuis l'API iptv-org
+python build_channels.py      # pulls channel/category/country data from iptv-org
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-## Lancer avec Docker
+Or with Docker:
 
 ```bash
 docker compose up --build -d
 ```
 
-Le build execute `build_channels.py`, donc l'image contient une liste de
-chaines figee au moment du build. Pour la rafraichir : `docker compose build --no-cache`.
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for production deployment
+notes, including a documented gotcha for [Dokploy](https://dokploy.com/) +
+Traefik setups.
 
-## Brancher NetStream dessus
+## Pointing NetStream at it
 
-Dans NetStream (PS Vita), reglages -> HTTP server :
+On the PS Vita, in NetStream's settings → HTTP server:
 
-- **Adresse de l'hote** : `http://<IP_OU_DOMAINE_DU_SERVEUR>` (le `http://`
-  est obligatoire, une IP nue fait echouer la connexion — voir pourquoi dans
-  `app.py`)
-- **Port** : `8000` (ou celui choisi en prod, ex. 80/443 derriere un reverse proxy)
+- **Host address**: `http://<ip-or-domain>` — the scheme (`http://` /
+  `https://`) is **required**; a bare IP makes the connection silently fail.
+- **Port**: `8000` locally, or `443` behind an HTTPS reverse proxy.
 
-## Arborescence exposee
+## Health diagnostics
 
-```
-/                          -> liste des pays
-/{cc}/                     -> categories du pays + "az"
-/{cc}/{categorie}/         -> chaines de la categorie
-/{cc}/az/{lettre}/         -> chaines commencant par cette lettre
-/resolve/{cc}/{id}.m3u8    -> manifest HLS reecrit (URLs absolues)
+```bash
+curl https://your-domain/_status          # summary: total / ok / broken, with error samples
+curl -X POST https://your-domain/_admin/recheck   # trigger a manual re-check
 ```
 
-## Etat du projet
+If a channel shows `ok: true` here but still fails to play on the console,
+the issue is most likely on the client side (HLS player/firmware), not the
+stream — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#channel-health-detection).
 
-MVP valide sur hardware reel (Vita + NetStream) avec les chaines iptv-org.
-Prochaine etape : remplacer `build_channels.py` (source iptv-org) par une
-vraie source de contenu legitime (Jellyfin auto-heberge ou API officielle)
-sans toucher au reste du bridge — `app.py` ne depend que de la forme du
-fichier `data/channels.json` (`id`, `name`, `country`, `categories`, `url`).
+## Project scope
+
+This is, and is meant to stay, a **TV channel streaming bridge**. It only
+ever serves publicly listed IPTV channel URLs (public domain data from
+iptv-org) — it does not fetch, proxy, or redistribute licensed video-on-demand
+content of any kind, and contributions in that direction won't be merged.
+
+## Documentation
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how it works, and the
+  NetStream client constraints that shaped the design.
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — local, Docker, and
+  Dokploy/Traefik deployment notes.
+- [`CHANGELOG.md`](CHANGELOG.md) — notable changes and the real bugs found
+  (and fixed) on actual hardware.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to contribute.
+
+## Credits
+
+- [NetStream](https://github.com/GrapheneCt/NetStream) by GrapheneCt — the
+  PS Vita client this bridge is built to serve.
+- [iptv-org](https://github.com/iptv-org) — the public, unlicensed
+  (public-domain) channel data this MVP uses by default.
+
+## License
+
+[MIT](LICENSE) for the code in this repository. Channel data comes from
+[iptv-org](https://github.com/iptv-org), released into the public domain
+under [The Unlicense](https://github.com/iptv-org/iptv/blob/master/LICENSE).
