@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py build_channels.py ./
+COPY app.py build_channels.py health.py ./
 
 # Genere data/channels.json, categories.json, countries.json a partir de
 # l'API iptv-org au moment du build -> l'image contient une liste figee ;
