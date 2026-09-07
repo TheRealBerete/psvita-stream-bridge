@@ -247,18 +247,40 @@ def rewrite_manifest(text: str, base_url: str) -> str:
     return "\n".join(out_lines) + "\n"
 
 
+# Manifest HLS minimal, syntaxiquement valide, sans aucun segment (RFC 8216 :
+# une playlist VOD vide se termine directement par EXT-X-ENDLIST). Renvoye a
+# la place de TOUTE erreur (chaine inconnue, source injoignable, timeout,
+# corps recu qui n'est pas un manifest...).
+#
+# Pourquoi : confirme sur hardware reel qu'un code d'erreur HTTP (404/502) en
+# reponse a une requete .m3u8 fait planter NetStream ENTIEREMENT (dump
+# psp2core, pas une simple erreur de lecture) au lieu d'un message d'echec
+# propre. Un manifest vide en 200 se comporte comme une chaine qui n'a rien
+# a diffuser -> NetStream le gere sans crasher.
+DEAD_CHANNEL_MANIFEST = (
+    "#EXTM3U\n"
+    "#EXT-X-VERSION:3\n"
+    "#EXT-X-TARGETDURATION:1\n"
+    "#EXT-X-MEDIA-SEQUENCE:0\n"
+    "#EXT-X-PLAYLIST-TYPE:VOD\n"
+    "#EXT-X-ENDLIST\n"
+)
+
+
 @app.get("/resolve/{cc}/{chan_id}.m3u8")
 def resolve(cc: str, chan_id: str):
     chan = _by_country_id.get((cc.upper(), chan_id))
-    if not chan:
-        raise HTTPException(status_code=404, detail="chaine inconnue")
-    try:
-        r = requests.get(chan["url"], timeout=10, headers={"User-Agent": "VLC/3.0.20"})
-        r.raise_for_status()
-    except requests.RequestException as e:
-        raise HTTPException(status_code=502, detail=f"source injoignable: {e}")
-    rewritten = rewrite_manifest(r.text, r.url)  # r.url = URL APRES redirection
-    return Response(content=rewritten, media_type=M3U8_CONTENT_TYPE)
+    if chan:
+        try:
+            r = requests.get(chan["url"], timeout=10, headers={"User-Agent": "VLC/3.0.20"})
+            if r.status_code == 200 and r.text.lstrip().startswith("#EXTM3U"):
+                rewritten = rewrite_manifest(r.text, r.url)  # r.url = URL APRES redirection
+                return Response(content=rewritten, media_type=M3U8_CONTENT_TYPE)
+        except requests.RequestException:
+            pass
+    # Chaine inconnue, source injoignable, timeout, ou reponse invalide :
+    # jamais de code d'erreur HTTP ici, voir le commentaire sur DEAD_CHANNEL_MANIFEST.
+    return Response(content=DEAD_CHANNEL_MANIFEST, media_type=M3U8_CONTENT_TYPE)
 
 
 # --- Diagnostic (detection de sante) ---------------------------------------
