@@ -46,19 +46,39 @@ understand client behavior, never modified):
 | **`SetPath()` (folder navigation) does plain string concatenation**: `current_url + escape(href) + "/"`, **not** real RFC 3986 relative URL resolution | `source/browsers/http_server_browser.cpp::SetPath` | Every **folder** `href` must be a single segment with no `/` inside it, otherwise a double slash appears → 404 → empty folder on the Vita |
 | The internal HLS player (`GetInfoForPlayer`), on the other hand, does proper URL merging | `source/browsers/http_server_browser.cpp::GetInfoForPlayer` | **File** hrefs (`/resolve/...`) can safely be absolute paths |
 | The HLS player resolves relative paths **inside a manifest** against the URL it was given (the bridge), not against the real stream host after redirection | observed behavior (this part is closed-source, no code available) | `/resolve/...` fetches the manifest itself and rewrites every URI (playlist lines and `URI="..."` attributes) to an absolute one via `urljoin` before returning it |
+| **The HTML parser only ever looks at the `href="..."` attribute** — the text between `<a>` and `</a>` is parsed but never displayed on the console | `source/browsers/http_server_browser.cpp` (the loop only extracts the `href` substring; confirmed against real screenshots, which always show the raw href, never a "pretty" label) | Any human-readable name (a country, a language) has to **be** the href itself (URL-quoted), not just the link's text |
 
 ## Exposed navigation tree
 
 ```
-/                          list of countries
-/{cc}/                     the country's categories + an "az" shortcut
-/{cc}/{category}/          channels in that category
-/{cc}/az/                  available letters
-/{cc}/az/{letter}/         channels starting with that letter
-/resolve/{cc}/{id}.m3u8    rewritten HLS manifest, ready to play
-/_status                   JSON health diagnostics
-/_admin/recheck            manually trigger a health check (POST)
+/                              choice: browse by country or by language
+/country/                      list of countries
+/country/{cc}/                 the country's categories + an "az" shortcut
+/country/{cc}/{category}/      channels in that category
+/country/{cc}/az/              available letters
+/country/{cc}/az/{letter}/     channels starting with that letter
+/language/                     list of languages
+/language/{lang}/              the language's categories + an "az" shortcut
+/language/{lang}/{category}/   channels in that category
+/language/{lang}/az/           available letters
+/language/{lang}/az/{letter}/  channels starting with that letter
+/resolve/{cc}/{id}.m3u8         rewritten HLS manifest, ready to play — always
+                                addressed by the channel's real country, no
+                                matter which partition (country or language)
+                                was used to reach it
+/_status                       JSON health diagnostics
+/_admin/recheck                 manually trigger a health check (POST)
 ```
+
+**Country and language are two independent partitions over the exact same
+channel set**, not two separate datasets: a channel can appear under several
+languages (if it broadcasts bilingually) the same way it can already appear
+under several categories. Both partitions share the identical
+category/A-Z browsing logic underneath (`render_key_categories`,
+`render_key_token`, `render_key_letter` in `app.py`) — only the partitioning
+key changes. Language data comes from a separate `feeds.json` endpoint
+(`channels.json` itself carries no language field) and covers 100% of the
+channels used here.
 
 There's no text search (NetStream doesn't offer one): category browsing and
 the alphabetical index stand in for it.

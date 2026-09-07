@@ -17,16 +17,33 @@ et source/players/player_beav.cpp) :
   - SetPath() (navigation dossier) fait une simple concatenation de chaines,
     pas une vraie resolution d'URL relative -> chaque href de DOSSIER doit
     etre un segment UNIQUE, sans aucun "/" dedans.
+  - Le parseur ne regarde QUE l'attribut href="..." -> le texte entre <a> et
+    </a> n'est jamais affiche sur la console (confirme par captures d'ecran
+    reelles : on y voit le href brut, jamais un libelle "joli"). Pour qu'un
+    nom lisible (nom de pays/langue) soit visible, il doit etre le href
+    lui-meme (url-quote), pas juste le texte du lien.
 
 Arborescence de navigation (pas de recherche texte possible cote NetStream,
-donc categories + index alphabetique en guise de raccourcis) :
+donc categories + index alphabetique en guise de raccourcis). Deux facons
+d'arriver a une chaine -> "pays" et "langue" sont deux vues (partitions)
+differentes sur le MEME jeu de chaines, avec exactement la meme mecanique
+categorie/A-Z en dessous :
 
-  GET /                                   -> liste des pays (dossiers)
-  GET /{cc}/                              -> categories du pays + dossier "az"
-  GET /{cc}/{categorie}/                  -> chaines de cette categorie
-  GET /{cc}/az/                           -> lettres disponibles
-  GET /{cc}/az/{lettre}/                  -> chaines commencant par cette lettre
-  GET /resolve/{cc}/{chan_id}.m3u8        -> manifest HLS reecrit (URLs absolues)
+  GET /                                   -> choix "par pays" / "par langue"
+  GET /country/                           -> liste des pays (dossiers)
+  GET /country/{cc}/                      -> categories du pays + dossier "az"
+  GET /country/{cc}/{categorie}/          -> chaines de cette categorie
+  GET /country/{cc}/az/                   -> lettres disponibles
+  GET /country/{cc}/az/{lettre}/          -> chaines commencant par cette lettre
+  GET /language/                          -> liste des langues (dossiers)
+  GET /language/{lang}/                   -> categories de la langue + dossier "az"
+  GET /language/{lang}/{categorie}/       -> chaines de cette categorie
+  GET /language/{lang}/az/                -> lettres disponibles
+  GET /language/{lang}/az/{lettre}/       -> chaines commencant par cette lettre
+  GET /resolve/{cc}/{chan_id}.m3u8        -> manifest HLS reecrit (URLs absolues),
+                                              toujours adresse par le VRAI pays de
+                                              la chaine, quelle que soit la partition
+                                              utilisee pour y arriver
   GET /_status                            -> diagnostic JSON (pas lie depuis la navigation)
   POST /_admin/recheck                    -> declenche une verification manuelle
 
@@ -35,7 +52,7 @@ listees dans la navigation -> une chaine morte/geo-bloquee/HS n'apparait
 jamais devant l'utilisateur (voir "Detection de sante" ci-dessous).
 
 Donnees generees par build_channels.py (iptv-org/api : channels/categories/
-streams/countries.json), pas de contenu sous licence.
+streams/countries/feeds/languages.json), pas de contenu sous licence.
 
 Lancer :
     uvicorn app:app --host 0.0.0.0 --port 8000
@@ -49,7 +66,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 import requests
 from fastapi import FastAPI, HTTPException
@@ -74,11 +91,34 @@ with (DATA_DIR / "categories.json").open(encoding="utf-8") as f:
     _category_names = json.load(f)
 with (DATA_DIR / "countries.json").open(encoding="utf-8") as f:
     _country_names = json.load(f)
+with (DATA_DIR / "languages.json").open(encoding="utf-8") as f:
+    _language_names = json.load(f)
 
-_by_country = defaultdict(list)          # pays -> [chaine, ...]
-_by_country_category = defaultdict(list)  # (pays, categorie) -> [chaine, ...]
-_by_country_letter = defaultdict(list)    # (pays, lettre) -> [chaine, ...]
-_by_country_id = {}                       # (pays, id) -> chaine, pour /resolve
+# NetStream n'affiche JAMAIS le texte entre <a> et </a> : son parseur HTML
+# (source/browsers/http_server_browser.cpp) extrait uniquement la valeur de
+# l'attribut href et l'affiche telle quelle comme nom de dossier/fichier
+# (confirme par les captures d'ecran reelles : on y voit "us", "az", jamais
+# les libelles "France (175)" qu'on ecrivait pourtant en texte). Donc pour
+# qu'un nom complet ("France", "English") soit VISIBLE sur la console, le
+# href lui-meme doit etre ce nom complet -> on a besoin d'un dictionnaire
+# inverse nom -> code pour retrouver la partition interne quand la Vita
+# revient avec ce nom dans l'URL suivante.
+_country_code_by_name = {name: code for code, name in _country_names.items()}
+_language_code_by_name = {name: code for code, name in _language_names.items()}
+
+# Deux partitions independantes sur le MEME jeu de chaines (une chaine peut
+# apparaitre sous plusieurs langues si elle est multilingue, comme elle peut
+# deja apparaitre sous plusieurs categories). Chaque partition a sa propre
+# racine, ses (cle, categorie) et (cle, lettre) -> [chaine, ...].
+_by_country = defaultdict(list)
+_by_country_category = defaultdict(list)
+_by_country_letter = defaultdict(list)
+
+_by_language = defaultdict(list)
+_by_language_category = defaultdict(list)
+_by_language_letter = defaultdict(list)
+
+_channel_by_country_id = {}  # (pays, id) -> chaine, pour /resolve (independant de la partition de navigation)
 
 _status: dict = {}          # cle "PAYS:id" -> {"ok": bool, "error": str|None, "checked_at": float}
 _recheck_running = False    # empeche deux verifications de tourner en meme temps
@@ -91,13 +131,24 @@ def _letter_bucket(name: str) -> str:
 
 for chan in _channels:
     cc = chan["country"]
+    letter = _letter_bucket(chan["name"])
     _by_country[cc].append(chan)
+    _by_country_letter[(cc, letter)].append(chan)
+    _channel_by_country_id[(cc, chan["id"])] = chan
     for cat in chan["categories"]:
         _by_country_category[(cc, cat)].append(chan)
-    _by_country_letter[(cc, _letter_bucket(chan["name"]))].append(chan)
-    _by_country_id[(cc, chan["id"])] = chan
 
-for lst in (*_by_country.values(), *_by_country_category.values(), *_by_country_letter.values()):
+    for lang in chan["languages"]:
+        _by_language[lang].append(chan)
+        _by_language_letter[(lang, letter)].append(chan)
+        for cat in chan["categories"]:
+            _by_language_category[(lang, cat)].append(chan)
+
+_ALL_PARTITION_LISTS = (
+    *_by_country.values(), *_by_country_category.values(), *_by_country_letter.values(),
+    *_by_language.values(), *_by_language_category.values(), *_by_language_letter.values(),
+)
+for lst in _ALL_PARTITION_LISTS:
     lst.sort(key=lambda c: c["name"].lower())
 
 
@@ -109,15 +160,18 @@ def _reload_status() -> None:
 _reload_status()
 
 
-def is_ok(cc: str, chan_id: str) -> bool:
+def is_ok(chan: dict) -> bool:
     """Une chaine jamais verifiee est consideree disponible par defaut (on ne
-    veut pas vider toute la navigation avant la toute premiere verification)."""
-    entry = _status.get(f"{cc}:{chan_id}")
+    veut pas vider toute la navigation avant la toute premiere verification).
+    La sante d'une chaine est toujours liee a son VRAI pays d'origine (c'est
+    la cle utilisee par health.py), peu importe la partition (pays ou langue)
+    depuis laquelle on la consulte."""
+    entry = _status.get(f"{chan['country']}:{chan['id']}")
     return True if entry is None else entry["ok"]
 
 
-def only_ok(cc: str, chans: list[dict]) -> list[dict]:
-    return [c for c in chans if is_ok(cc, c["id"])]
+def only_ok(chans: list[dict]) -> list[dict]:
+    return [c for c in chans if is_ok(c)]
 
 
 # --- Rendu HTML minimal (celui que le parseur <a href> de NetStream attend) --
@@ -127,8 +181,8 @@ def page(items: list[tuple[str, str]]) -> str:
     return f"<html><body><ul>\n{lis}\n</ul></body></html>"
 
 
-def channel_links(cc: str, chans: list[dict]) -> list[tuple[str, str]]:
-    return [(c["name"], f"/resolve/{cc}/{c['id']}.m3u8") for c in only_ok(cc, chans)]
+def channel_links(chans: list[dict]) -> list[tuple[str, str]]:
+    return [(c["name"], f"/resolve/{c['country']}/{c['id']}.m3u8") for c in only_ok(chans)]
 
 
 # --- Verification de sante, en tache de fond --------------------------------
@@ -164,61 +218,117 @@ app = FastAPI(title="psvita-stream-bridge", lifespan=lifespan)
 
 
 # --- Navigation ---------------------------------------------------------
+#
+# "pays" et "langue" sont deux partitions differentes du meme jeu de chaines,
+# avec exactement la meme mecanique de navigation en dessous (racine ->
+# categorie ou A-Z -> chaine) -> factorisee une seule fois ici, chaque route
+# ne fait que choisir les bons dictionnaires et convertir nom <-> code.
+#
+# Le href d'une entree "racine" (pays/langue) est le NOM COMPLET, url-quote
+# (voir le commentaire sur _country_code_by_name plus haut : c'est le seul
+# moyen de le rendre visible sur la console). Les niveaux plus profonds
+# (categorie, "az", lettre) restent des identifiants courts deja lisibles
+# (ids de categorie iptv-org, lettres) -> pas besoin du meme traitement.
+
+def render_root_listing(by_key: dict[str, list[dict]], names: dict[str, str]) -> str:
+    items = [
+        (names.get(k, k), quote(names.get(k, k), safe=""))
+        for k, chans in by_key.items()
+        if only_ok(chans)
+    ]
+    items.sort(key=lambda t: t[0].lower())
+    return page(items)
+
+
+def render_key_categories(
+    key: str, by_key: dict, by_key_category: dict, not_found_msg: str
+) -> str:
+    if key not in by_key:
+        raise HTTPException(status_code=404, detail=not_found_msg)
+    cats_here = {cat for c in by_key[key] for cat in c["categories"]}
+    items = [
+        (_category_names.get(cat, cat), cat)
+        for cat in cats_here
+        if only_ok(by_key_category[(key, cat)])
+    ]
+    items.sort(key=lambda t: t[0].lower())
+    if only_ok(by_key[key]):
+        items.insert(0, ("Toutes les chaines A-Z", "az"))
+    return page(items)
+
+
+def render_key_token(
+    key: str, token: str, by_key: dict, by_key_category: dict, by_key_letter: dict, not_found_msg: str
+) -> str:
+    """Un seul niveau de route pour categorie OU 'az' (meme profondeur, segment unique)."""
+    if token == "az":
+        if key not in by_key:
+            raise HTTPException(status_code=404, detail=not_found_msg)
+        letters = sorted({_letter_bucket(c["name"]) for c in by_key[key] if is_ok(c)})
+        return page([(l, l) for l in letters])
+
+    chans = by_key_category.get((key, token))
+    if chans is None:
+        raise HTTPException(status_code=404, detail="categorie inconnue")
+    return page(channel_links(chans))
+
+
+def render_key_letter(key: str, letter: str, by_key_letter: dict, not_found_msg: str) -> str:
+    chans = by_key_letter.get((key, letter.upper()))
+    if chans is None:
+        raise HTTPException(status_code=404, detail=not_found_msg)
+    return page(channel_links(chans))
+
 
 @app.get("/", response_class=HTMLResponse)
-def list_countries():
-    items = [
-        (f"{_country_names.get(cc, cc)} ({len(only_ok(cc, chans))})", cc.lower())
-        for cc, chans in _by_country.items()
-        if only_ok(cc, chans)
-    ]
-    items.sort(key=lambda t: t[0].lower())
-    return page(items)
+def root_menu():
+    return page([("Par pays", "country"), ("Par langue", "language")])
 
 
-@app.get("/{cc}/", response_class=HTMLResponse)
+@app.get("/country/", response_class=HTMLResponse)
+def list_country_root():
+    return render_root_listing(_by_country, _country_names)
+
+
+@app.get("/country/{cc}/", response_class=HTMLResponse)
 def list_country_categories(cc: str):
-    cc = cc.upper()
-    if cc not in _by_country:
-        raise HTTPException(status_code=404, detail="pays inconnu")
-
-    cats_here = {cat for c in _by_country[cc] for cat in c["categories"]}
-    items = [
-        (f"{_category_names.get(cat, cat)} ({len(only_ok(cc, _by_country_category[(cc, cat)]))})", cat)
-        for cat in cats_here
-        if only_ok(cc, _by_country_category[(cc, cat)])
-    ]
-    items.sort(key=lambda t: t[0].lower())
-    if only_ok(cc, _by_country[cc]):
-        items.insert(0, (f"Toutes les chaines A-Z ({len(only_ok(cc, _by_country[cc]))})", "az"))
-    return page(items)
+    code = _country_code_by_name.get(cc, cc.upper())
+    return render_key_categories(code, _by_country, _by_country_category, "pays inconnu")
 
 
-@app.get("/{cc}/{token}/", response_class=HTMLResponse)
+@app.get("/country/{cc}/{token}/", response_class=HTMLResponse)
 def list_country_token(cc: str, token: str):
-    """Un seul niveau de route pour categorie OU 'az' (meme profondeur, segment unique)."""
-    cc = cc.upper()
-    if token == "az":
-        if cc not in _by_country:
-            raise HTTPException(status_code=404, detail="pays inconnu")
-        letters = sorted({_letter_bucket(c["name"]) for c in _by_country[cc]
-                           if is_ok(cc, c["id"])})
-        items = [(f"{l} ({len(only_ok(cc, _by_country_letter[(cc, l)]))})", l) for l in letters]
-        return page(items)
-
-    chans = _by_country_category.get((cc, token))
-    if chans is None:
-        raise HTTPException(status_code=404, detail="categorie inconnue pour ce pays")
-    return page(channel_links(cc, chans))
+    code = _country_code_by_name.get(cc, cc.upper())
+    return render_key_token(code, token, _by_country, _by_country_category, _by_country_letter, "pays inconnu")
 
 
-@app.get("/{cc}/az/{letter}/", response_class=HTMLResponse)
-def list_letter_channels(cc: str, letter: str):
-    cc = cc.upper()
-    chans = _by_country_letter.get((cc, letter.upper()))
-    if chans is None:
-        raise HTTPException(status_code=404, detail="lettre inconnue pour ce pays")
-    return page(channel_links(cc, chans))
+@app.get("/country/{cc}/az/{letter}/", response_class=HTMLResponse)
+def list_country_letter(cc: str, letter: str):
+    code = _country_code_by_name.get(cc, cc.upper())
+    return render_key_letter(code, letter, _by_country_letter, "lettre inconnue pour ce pays")
+
+
+@app.get("/language/", response_class=HTMLResponse)
+def list_language_root():
+    return render_root_listing(_by_language, _language_names)
+
+
+@app.get("/language/{lang}/", response_class=HTMLResponse)
+def list_language_categories(lang: str):
+    code = _language_code_by_name.get(lang, lang.lower())
+    return render_key_categories(code, _by_language, _by_language_category, "langue inconnue")
+
+
+@app.get("/language/{lang}/{token}/", response_class=HTMLResponse)
+def list_language_token(lang: str, token: str):
+    code = _language_code_by_name.get(lang, lang.lower())
+    return render_key_token(code, token, _by_language, _by_language_category, _by_language_letter, "langue inconnue")
+
+
+@app.get("/language/{lang}/az/{letter}/", response_class=HTMLResponse)
+def list_language_letter(lang: str, letter: str):
+    code = _language_code_by_name.get(lang, lang.lower())
+    return render_key_letter(code, letter, _by_language_letter, "lettre inconnue pour cette langue")
 
 
 # --- Resolution HLS -------------------------------------------------------
@@ -269,7 +379,7 @@ DEAD_CHANNEL_MANIFEST = (
 
 @app.get("/resolve/{cc}/{chan_id}.m3u8")
 def resolve(cc: str, chan_id: str):
-    chan = _by_country_id.get((cc.upper(), chan_id))
+    chan = _channel_by_country_id.get((cc.upper(), chan_id))
     if chan:
         try:
             r = requests.get(chan["url"], timeout=10, headers={"User-Agent": "VLC/3.0.20"})

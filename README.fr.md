@@ -26,7 +26,10 @@ qui ont dicté chaque choix de conception ici.
 ## Fonctionnalités
 
 - Une arborescence de navigation que NetStream peut réellement parcourir :
-  `pays → catégorie ou A-Z → chaîne → flux`.
+  choix entre **pays** et **langue** en premier, puis `catégorie ou A-Z →
+  chaîne → flux`. Pays et langue sont deux vues indépendantes sur les mêmes
+  chaînes — une chaîne bilingue apparaît sous les deux langues, exactement
+  comme elle peut déjà apparaître sous plusieurs catégories.
 - Réécriture du manifest HLS pour que les chemins relatifs des
   sous-playlists se résolvent correctement dans le lecteur de NetStream
   (voir [`docs/ARCHITECTURE.fr.md`](docs/ARCHITECTURE.fr.md) pour le
@@ -47,9 +50,9 @@ Vraies photos de la navigation qui tourne réellement sur une PS Vita via NetStr
 
 <table>
 <tr>
-<td><img src="assets/screenshot-countries.jpg" alt="Liste des pays sur PS Vita"><br><sub>Liste des pays (<code>/</code>)</sub></td>
-<td><img src="assets/screenshot-categories.jpg" alt="Liste des catégories sur PS Vita"><br><sub>Catégories d'un pays (<code>/us/</code>)</sub></td>
-<td><img src="assets/screenshot-channels.jpg" alt="Liens de chaînes résolus sur PS Vita"><br><sub>Chaînes prêtes à lire (<code>/us/news/</code>)</sub></td>
+<td><img src="assets/screenshot-countries.jpg" alt="Liste des pays sur PS Vita"><br><sub>Liste des pays (<code>/country/</code>)</sub></td>
+<td><img src="assets/screenshot-categories.jpg" alt="Liste des catégories sur PS Vita"><br><sub>Catégories d'un pays (<code>/country/us/</code>)</sub></td>
+<td><img src="assets/screenshot-channels.jpg" alt="Liens de chaînes résolus sur PS Vita"><br><sub>Chaînes prêtes à lire (<code>/country/us/news/</code>)</sub></td>
 </tr>
 </table>
 

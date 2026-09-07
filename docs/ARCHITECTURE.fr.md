@@ -44,19 +44,39 @@ comprendre son comportement client) :
 | **`SetPath()` (navigation dossier) fait une simple concaténation de chaînes** : `url_actuelle + escape(href) + "/"`, **pas** une vraie résolution d'URL relative (RFC 3986) | `source/browsers/http_server_browser.cpp::SetPath` | Chaque `href` de **dossier** doit être un segment unique, sans aucun `/` dedans, sinon on obtient un double-slash → 404 → dossier vide côté Vita |
 | Le lecteur HLS interne (`GetInfoForPlayer`) fait, lui, une vraie fusion d'URL | `source/browsers/http_server_browser.cpp::GetInfoForPlayer` | Les `href` de **fichiers** (`/resolve/...`) peuvent être des chemins absolus sans problème |
 | Le lecteur HLS résout les chemins **relatifs à l'intérieur d'un manifest** par rapport à l'URL demandée (le bridge), pas par rapport à l'hôte réel du flux après redirection | comportement observé (pas de code source disponible pour cette partie fermée) | `/resolve/...` télécharge le manifest lui-même et réécrit chaque URI (lignes + attributs `URI="..."`) en absolu via `urljoin` avant de le renvoyer |
+| **Le parseur HTML ne regarde QUE l'attribut `href="..."`** — le texte entre `<a>` et `</a>` est bien parse mais jamais affiche sur la console | `source/browsers/http_server_browser.cpp` (la boucle n'extrait que la sous-chaine `href` ; confirme sur de vraies captures d'ecran, qui montrent toujours le href brut, jamais un libelle "joli") | Un nom lisible (pays, langue) doit **etre** le href lui-meme (url-quote), pas juste le texte du lien |
 
 ## Arborescence de navigation exposée
 
 ```
-/                          liste des pays
-/{cc}/                     catégories du pays + raccourci "az"
-/{cc}/{categorie}/         chaînes de cette catégorie
-/{cc}/az/                  lettres disponibles
-/{cc}/az/{lettre}/         chaînes commençant par cette lettre
-/resolve/{cc}/{id}.m3u8    manifest HLS réécrit, prêt à être lu
-/_status                   diagnostic JSON (santé des chaînes)
-/_admin/recheck            déclenche une vérification manuelle (POST)
+/                              choix : naviguer par pays ou par langue
+/country/                      liste des pays
+/country/{cc}/                 catégories du pays + raccourci "az"
+/country/{cc}/{categorie}/     chaînes de cette catégorie
+/country/{cc}/az/              lettres disponibles
+/country/{cc}/az/{lettre}/     chaînes commençant par cette lettre
+/language/                     liste des langues
+/language/{lang}/              catégories de la langue + raccourci "az"
+/language/{lang}/{categorie}/  chaînes de cette catégorie
+/language/{lang}/az/           lettres disponibles
+/language/{lang}/az/{lettre}/  chaînes commençant par cette lettre
+/resolve/{cc}/{id}.m3u8         manifest HLS réécrit, prêt à être lu — toujours
+                                adressé par le vrai pays de la chaîne, quelle
+                                que soit la partition (pays ou langue) utilisée
+                                pour y arriver
+/_status                       diagnostic JSON (santé des chaînes)
+/_admin/recheck                 déclenche une vérification manuelle (POST)
 ```
+
+**Pays et langue sont deux partitions indépendantes sur le MEME jeu de
+chaînes**, pas deux jeux de données séparés : une chaîne peut apparaître
+sous plusieurs langues (si elle diffuse en bilingue) exactement comme elle
+peut déjà apparaître sous plusieurs catégories. Les deux partitions
+partagent exactement la même logique de navigation catégorie/A-Z en dessous
+(`render_key_categories`, `render_key_token`, `render_key_letter` dans
+`app.py`) — seule la clé de partitionnement change. Les données de langue
+viennent d'un endpoint séparé, `feeds.json` (`channels.json` lui-même ne
+porte aucun champ langue), et couvrent 100% des chaînes utilisées ici.
 
 Il n'y a pas de recherche texte (NetStream n'en offre pas) : la navigation
 par catégorie et l'index alphabétique en tiennent lieu.

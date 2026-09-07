@@ -24,8 +24,11 @@ design decision here.
 
 ## Features
 
-- Navigation tree NetStream can actually browse: `country → category or
-  A-Z → channel → stream`.
+- Navigation tree NetStream can actually browse: pick **country** or
+  **language** first, then `category or A-Z → channel → stream`. Country and
+  language are two independent views over the same channels — a bilingual
+  channel shows up under both languages, just like it can under several
+  categories.
 - HLS manifest rewriting so relative sub-playlist paths resolve correctly
   on NetStream's player (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
   for why this is needed).
@@ -43,9 +46,9 @@ Real photos of the actual navigation running on a PS Vita through NetStream:
 
 <table>
 <tr>
-<td><img src="assets/screenshot-countries.jpg" alt="Country list on PS Vita"><br><sub>Country list (<code>/</code>)</sub></td>
-<td><img src="assets/screenshot-categories.jpg" alt="Category list on PS Vita"><br><sub>A country's categories (<code>/us/</code>)</sub></td>
-<td><img src="assets/screenshot-channels.jpg" alt="Resolved channel links on PS Vita"><br><sub>Channels ready to play (<code>/us/news/</code>)</sub></td>
+<td><img src="assets/screenshot-countries.jpg" alt="Country list on PS Vita"><br><sub>Country list (<code>/country/</code>)</sub></td>
+<td><img src="assets/screenshot-categories.jpg" alt="Category list on PS Vita"><br><sub>A country's categories (<code>/country/us/</code>)</sub></td>
+<td><img src="assets/screenshot-channels.jpg" alt="Resolved channel links on PS Vita"><br><sub>Channels ready to play (<code>/country/us/news/</code>)</sub></td>
 </tr>
 </table>
 

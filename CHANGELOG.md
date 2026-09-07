@@ -17,6 +17,17 @@ milestone instead of a version number.
   plans to add licensed anime/manga sources.
 - Open-source housekeeping: MIT license, `CONTRIBUTING.md`,
   `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`, English + French docs.
+- **Browse by country or by language**: the landing page now asks which
+  partition to browse first (`/country/` or `/language/`), each sharing the
+  identical category/A-Z navigation logic underneath. Language data comes
+  from a previously-unused iptv-org endpoint (`feeds.json`), with 100%
+  channel coverage. A channel can appear under multiple languages, the same
+  way it already could under multiple categories.
+- Root and country/language listings now show the actual **full name**
+  (e.g. "France", "English") instead of a 2-3 letter code — discovered that
+  NetStream's HTML parser only ever reads the `href="..."` attribute and
+  never displays the link's inner text, so the full name has to be the href
+  itself (URL-quoted), not just a label.
 
 ## MVP (initial working version)
 
