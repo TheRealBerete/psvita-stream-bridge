@@ -37,6 +37,18 @@ design decision here.
 - No video proxying: the bridge only ever touches the small text manifest;
   actual video segments stream directly from the source CDN to the Vita.
 
+## Screenshots
+
+Real photos of the actual navigation running on a PS Vita through NetStream:
+
+<table>
+<tr>
+<td><img src="assets/screenshot-countries.jpg" alt="Country list on PS Vita"><br><sub>Country list (<code>/</code>)</sub></td>
+<td><img src="assets/screenshot-categories.jpg" alt="Category list on PS Vita"><br><sub>A country's categories (<code>/us/</code>)</sub></td>
+<td><img src="assets/screenshot-channels.jpg" alt="Resolved channel links on PS Vita"><br><sub>Channels ready to play (<code>/us/news/</code>)</sub></td>
+</tr>
+</table>
+
 ## Quick start
 
 ```bash

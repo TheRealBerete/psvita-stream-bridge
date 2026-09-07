@@ -41,6 +41,18 @@ qui ont dicté chaque choix de conception ici.
   texte ; les segments vidéo réels sont streamés directement depuis le CDN
   source vers la Vita.
 
+## Captures d'écran
+
+Vraies photos de la navigation qui tourne réellement sur une PS Vita via NetStream :
+
+<table>
+<tr>
+<td><img src="assets/screenshot-countries.jpg" alt="Liste des pays sur PS Vita"><br><sub>Liste des pays (<code>/</code>)</sub></td>
+<td><img src="assets/screenshot-categories.jpg" alt="Liste des catégories sur PS Vita"><br><sub>Catégories d'un pays (<code>/us/</code>)</sub></td>
+<td><img src="assets/screenshot-channels.jpg" alt="Liens de chaînes résolus sur PS Vita"><br><sub>Chaînes prêtes à lire (<code>/us/news/</code>)</sub></td>
+</tr>
+</table>
+
 ## Démarrage rapide
 
 ```bash
