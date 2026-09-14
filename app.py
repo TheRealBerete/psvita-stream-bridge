@@ -47,6 +47,15 @@ categorie/A-Z en dessous :
   GET /_status                            -> diagnostic JSON (pas lie depuis la navigation)
   POST /_admin/recheck                    -> declenche une verification manuelle
 
+API JSON (pour le client natif vita-iptv, pas pour NetStream) :
+
+  GET /api/countries                      -> [{code, name, count}]
+  GET /api/languages                      -> [{code, name, count}]
+  GET /api/categories                     -> [{id, name}]
+  GET /api/channels?country=FR            -> chaines saines de ce pays
+  GET /api/channels?language=eng          -> chaines saines de cette langue
+                                              (les deux params sont cumulables)
+
 Seules les chaines marquees "ok" par le detecteur de sante (health.py) sont
 listees dans la navigation -> une chaine morte/geo-bloquee/HS n'apparait
 jamais devant l'utilisateur (voir "Detection de sante" ci-dessous).
@@ -329,6 +338,83 @@ def list_language_token(lang: str, token: str):
 def list_language_letter(lang: str, letter: str):
     code = _language_code_by_name.get(lang, lang.lower())
     return render_key_letter(code, letter, _by_language_letter, "lettre inconnue pour cette langue")
+
+
+# --- API JSON (pour vita-iptv, le client natif VitaSDK) ---------------------
+#
+# Contrairement a la navigation NetStream ci-dessus, ce client-la n'a aucune
+# contrainte de parsing HTML : c'est nous qui ecrivons son interface, donc
+# du JSON classique avec des codes courts (pas besoin du nom complet dans
+# l'URL comme pour NetStream -- le client affiche les noms lisibles
+# lui-meme via son propre rendu texte).
+#
+# /api/channels renvoie la liste COMPLETE des chaines saines pour un pays
+# et/ou une langue -- pas de routes categorie/A-Z separees cote serveur :
+# les volumes par pays/langue restent petits (quelques centaines de chaines
+# au plus), le client trie/filtre lui-meme en memoire, exactement comme
+# iptv-web filtre son catalogue cote client apres un seul fetch.
+
+def _country_json(cc: str, chans: list[dict]) -> dict:
+    return {"code": cc, "name": _country_names.get(cc, cc), "count": len(only_ok(chans))}
+
+
+def _language_json(lang: str, chans: list[dict]) -> dict:
+    return {"code": lang, "name": _language_names.get(lang, lang), "count": len(only_ok(chans))}
+
+
+def _channel_json(c: dict) -> dict:
+    return {
+        "id": c["id"],
+        "name": c["name"],
+        "country": {"code": c["country"], "name": _country_names.get(c["country"], c["country"])},
+        "categories": c["categories"],
+        "resolve_url": f"/resolve/{c['country']}/{c['id']}.m3u8",
+    }
+
+
+@app.get("/api/countries")
+def api_countries():
+    items = [_country_json(cc, chans) for cc, chans in _by_country.items() if only_ok(chans)]
+    items.sort(key=lambda c: c["name"].lower())
+    return JSONResponse(items)
+
+
+@app.get("/api/languages")
+def api_languages():
+    items = [_language_json(lang, chans) for lang, chans in _by_language.items() if only_ok(chans)]
+    items.sort(key=lambda c: c["name"].lower())
+    return JSONResponse(items)
+
+
+@app.get("/api/categories")
+def api_categories():
+    items = [{"id": cid, "name": name} for cid, name in _category_names.items()]
+    items.sort(key=lambda c: c["name"].lower())
+    return JSONResponse(items)
+
+
+@app.get("/api/channels")
+def api_channels(country: str | None = None, language: str | None = None):
+    """Chaines saines pour un pays et/ou une langue (au moins un des deux requis)."""
+    if not country and not language:
+        raise HTTPException(status_code=400, detail="parametre 'country' ou 'language' requis")
+
+    candidates: list[dict] | None = None
+    if country:
+        candidates = _by_country.get(country.upper())
+        if candidates is None:
+            raise HTTPException(status_code=404, detail="pays inconnu")
+    if language:
+        lang_chans = _by_language.get(language.lower())
+        if lang_chans is None:
+            raise HTTPException(status_code=404, detail="langue inconnue")
+        if candidates is None:
+            candidates = lang_chans
+        else:
+            lang_keys = {(c["country"], c["id"]) for c in lang_chans}
+            candidates = [c for c in candidates if (c["country"], c["id"]) in lang_keys]
+
+    return JSONResponse([_channel_json(c) for c in only_ok(candidates)])
 
 
 # --- Resolution HLS -------------------------------------------------------
